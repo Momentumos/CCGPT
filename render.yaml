@@ -1,0 +1,51 @@
+services:
+  # PostgreSQL Database
+  - type: pserv
+    name: ccgpt-db
+    env: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile.postgres
+    disk:
+      name: ccgpt-postgres-data
+      mountPath: /var/lib/postgresql/data
+      sizeGB: 1
+
+  # Redis
+  - type: redis
+    name: ccgpt-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+  # Web Service (Django + Daphne)
+  - type: web
+    name: ccgpt-web
+    env: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: "./build.sh"
+    startCommand: "daphne -b 0.0.0.0 -p $PORT config.asgi:application"
+    healthCheckPath: /admin/login/
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: False
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ccgpt-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: ccgpt-redis
+          property: connectionString
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false

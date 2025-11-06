@@ -127,8 +127,27 @@ docker-compose exec web python manage.py test
 ```
 
 ## 🌐 API Development
-Django REST Framework is pre-configured. Access the browsable API at:
-- **http://localhost:8000/api/** (configure your URLs)
+
+### Interactive API Documentation
+The API comes with comprehensive interactive documentation:
+
+- **Swagger UI**: http://localhost:8000/api/docs/
+- **ReDoc**: http://localhost:8000/api/redoc/
+- **OpenAPI Schema**: http://localhost:8000/api/schema/
+
+These provide:
+- Complete API endpoint documentation
+- Request/response examples
+- Interactive API testing
+- Authentication configuration
+- Model schemas
+
+### API Endpoints
+- `POST /api/chat/submit/` - Submit a new message request
+- `GET /api/chat/requests/` - List all message requests
+- `GET /api/chat/requests/{id}/` - Get specific request status
+- `GET /api/chat/chats/` - List all chats
+- `GET /api/chat/chats/{chat_id}/` - Get specific chat details
 
 ## 🔒 Production Deployment
 

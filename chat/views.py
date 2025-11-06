@@ -9,6 +9,8 @@ from .models import MessageRequest, Chat
 from .serializers import MessageRequestSerializer, MessageSubmitSerializer
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
+from drf_spectacular.types import OpenApiTypes
 
 
 class APIKeyAuthentication(BaseAuthentication):
@@ -26,22 +28,67 @@ class APIKeyAuthentication(BaseAuthentication):
             raise AuthenticationFailed('Invalid API key')
 
 
+@extend_schema(
+    tags=['Chat'],
+    summary='Submit a new message request',
+    description=(
+        'Submit a message to be processed by the browser extension. '
+        'If chat_id is not provided, a new chat will be created. '
+        'If chat_id is provided, the message will be added to that existing chat. '
+        'The request will be queued and sent to the connected browser extension via WebSocket.'
+    ),
+    request=MessageSubmitSerializer,
+    responses={
+        201: MessageRequestSerializer,
+        400: OpenApiTypes.OBJECT,
+        401: OpenApiTypes.OBJECT,
+        404: OpenApiTypes.OBJECT,
+    },
+    examples=[
+        OpenApiExample(
+            'New Chat Request',
+            value={
+                "message": "Explain quantum computing in simple terms",
+                "response_type": "thinking",
+                "thinking_time": "extended"
+            },
+            request_only=True,
+        ),
+        OpenApiExample(
+            'Continue Existing Chat',
+            value={
+                "message": "Can you give me more details?",
+                "response_type": "auto",
+                "thinking_time": "standard",
+                "chat_id": "chatcmpl-abc123xyz"
+            },
+            request_only=True,
+        ),
+        OpenApiExample(
+            'Success Response',
+            value={
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "message": "Explain quantum computing in simple terms",
+                "response_type": "thinking",
+                "thinking_time": "extended",
+                "status": "idle",
+                "response": None,
+                "error_message": None,
+                "chat": 1,
+                "queued_at": "2024-01-15T10:30:00Z",
+                "started_at": None,
+                "completed_at": None
+            },
+            response_only=True,
+            status_codes=['201'],
+        ),
+    ],
+)
 @api_view(['POST'])
 @authentication_classes([APIKeyAuthentication])
 def submit_message(request):
     """
     Submit a message request to be processed by browser extension
-    
-    Headers:
-        X-API-Key: Your API key
-    
-    Body:
-        {
-            "message": "Your message here",
-            "response_type": "thinking|auto|instant",
-            "thinking_time": "standard|extended",
-            "chat_id": "optional-chat-id"
-        }
     """
     serializer = MessageSubmitSerializer(data=request.data)
     if not serializer.is_valid():
@@ -98,6 +145,69 @@ def submit_message(request):
     )
 
 
+@extend_schema(
+    tags=['Chat'],
+    summary='Get message request status',
+    description='Retrieve the current status and details of a specific message request by its ID.',
+    responses={
+        200: MessageRequestSerializer,
+        401: OpenApiTypes.OBJECT,
+        404: OpenApiTypes.OBJECT,
+    },
+    examples=[
+        OpenApiExample(
+            'Idle Request',
+            value={
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "message": "Explain quantum computing",
+                "response_type": "thinking",
+                "thinking_time": "extended",
+                "status": "idle",
+                "response": None,
+                "error_message": None,
+                "chat": 1,
+                "queued_at": "2024-01-15T10:30:00Z",
+                "started_at": None,
+                "completed_at": None
+            },
+            response_only=True,
+        ),
+        OpenApiExample(
+            'Completed Request',
+            value={
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "message": "Explain quantum computing",
+                "response_type": "thinking",
+                "thinking_time": "extended",
+                "status": "done",
+                "response": "Quantum computing is a type of computing that uses quantum-mechanical phenomena...",
+                "error_message": None,
+                "chat": 1,
+                "queued_at": "2024-01-15T10:30:00Z",
+                "started_at": "2024-01-15T10:30:05Z",
+                "completed_at": "2024-01-15T10:30:45Z"
+            },
+            response_only=True,
+        ),
+        OpenApiExample(
+            'Failed Request',
+            value={
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "message": "Explain quantum computing",
+                "response_type": "thinking",
+                "thinking_time": "extended",
+                "status": "failed",
+                "response": None,
+                "error_message": "ChatGPT session expired. Please reconnect the extension.",
+                "chat": 1,
+                "queued_at": "2024-01-15T10:30:00Z",
+                "started_at": "2024-01-15T10:30:05Z",
+                "completed_at": "2024-01-15T10:30:10Z"
+            },
+            response_only=True,
+        ),
+    ],
+)
 @api_view(['GET'])
 @authentication_classes([APIKeyAuthentication])
 def get_request_status(request, request_id):
@@ -112,6 +222,59 @@ def get_request_status(request, request_id):
     return Response(MessageRequestSerializer(message_request).data)
 
 
+@extend_schema(
+    tags=['Chat'],
+    summary='List all message requests',
+    description='Retrieve a list of all message requests for the authenticated account. Optionally filter by status.',
+    parameters=[
+        OpenApiParameter(
+            name='status',
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            description='Filter by request status',
+            enum=['idle', 'executing', 'done', 'failed'],
+            required=False,
+        ),
+    ],
+    responses={
+        200: MessageRequestSerializer(many=True),
+        401: OpenApiTypes.OBJECT,
+    },
+    examples=[
+        OpenApiExample(
+            'List of Requests',
+            value=[
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "message": "Explain quantum computing",
+                    "response_type": "thinking",
+                    "thinking_time": "extended",
+                    "status": "done",
+                    "response": "Quantum computing is...",
+                    "error_message": None,
+                    "chat": 1,
+                    "queued_at": "2024-01-15T10:30:00Z",
+                    "started_at": "2024-01-15T10:30:05Z",
+                    "completed_at": "2024-01-15T10:30:45Z"
+                },
+                {
+                    "id": "660e8400-e29b-41d4-a716-446655440001",
+                    "message": "What is machine learning?",
+                    "response_type": "auto",
+                    "thinking_time": "standard",
+                    "status": "idle",
+                    "response": None,
+                    "error_message": None,
+                    "chat": 2,
+                    "queued_at": "2024-01-15T11:00:00Z",
+                    "started_at": None,
+                    "completed_at": None
+                }
+            ],
+            response_only=True,
+        ),
+    ],
+)
 @api_view(['GET'])
 @authentication_classes([APIKeyAuthentication])
 def list_requests(request):
@@ -128,6 +291,37 @@ def list_requests(request):
     return Response(serializer.data)
 
 
+@extend_schema(
+    tags=['Chat'],
+    summary='List all chats',
+    description='Retrieve a list of all chats for the authenticated account.',
+    responses={
+        200: OpenApiTypes.OBJECT,
+        401: OpenApiTypes.OBJECT,
+    },
+    examples=[
+        OpenApiExample(
+            'List of Chats',
+            value=[
+                {
+                    "id": 1,
+                    "chat_id": "chatcmpl-abc123xyz",
+                    "title": "Quantum Computing Discussion",
+                    "created_at": "2024-01-15T10:30:00Z",
+                    "updated_at": "2024-01-15T10:35:00Z"
+                },
+                {
+                    "id": 2,
+                    "chat_id": "chatcmpl-def456uvw",
+                    "title": "Machine Learning Basics",
+                    "created_at": "2024-01-15T11:00:00Z",
+                    "updated_at": "2024-01-15T11:05:00Z"
+                }
+            ],
+            response_only=True,
+        ),
+    ],
+)
 @api_view(['GET'])
 @authentication_classes([APIKeyAuthentication])
 def list_chats(request):
@@ -140,6 +334,29 @@ def list_chats(request):
     return Response(serializer.data)
 
 
+@extend_schema(
+    tags=['Chat'],
+    summary='Get chat details',
+    description='Retrieve details of a specific chat by its ChatGPT chat_id.',
+    responses={
+        200: OpenApiTypes.OBJECT,
+        401: OpenApiTypes.OBJECT,
+        404: OpenApiTypes.OBJECT,
+    },
+    examples=[
+        OpenApiExample(
+            'Chat Details',
+            value={
+                "id": 1,
+                "chat_id": "chatcmpl-abc123xyz",
+                "title": "Quantum Computing Discussion",
+                "created_at": "2024-01-15T10:30:00Z",
+                "updated_at": "2024-01-15T10:35:00Z"
+            },
+            response_only=True,
+        ),
+    ],
+)
 @api_view(['GET'])
 @authentication_classes([APIKeyAuthentication])
 def get_chat(request, chat_id):
