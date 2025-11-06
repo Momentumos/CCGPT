@@ -80,6 +80,7 @@ class MessageRequest(models.Model):
     queued_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    last_retrieved_at = models.DateTimeField(null=True, blank=True, help_text="Last time this request was retrieved via API")
     webhook_sent = models.BooleanField(default=False)
     webhook_sent_at = models.DateTimeField(null=True, blank=True)
     
@@ -95,6 +96,12 @@ class MessageRequest(models.Model):
     
     def __str__(self):
         return f"{self.account.email} - {self.status} - {self.message[:50]}"
+    
+    def mark_retrieved(self):
+        """Mark request as retrieved via API"""
+        from django.utils import timezone
+        self.last_retrieved_at = timezone.now()
+        self.save(update_fields=['last_retrieved_at'])
     
     def mark_executing(self):
         """Mark request as executing"""

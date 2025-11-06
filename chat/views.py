@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 from django.shortcuts import get_object_or_404
+from django.http import JsonResponse
 from account.models import GPTAccount
 from .models import MessageRequest, Chat
 from .serializers import MessageRequestSerializer, MessageSubmitSerializer
@@ -11,6 +12,14 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
+
+
+def health_check(request):
+    """Health check endpoint for monitoring services like Render.com"""
+    return JsonResponse({
+        "status": "healthy",
+        "service": "CCGPT API"
+    })
 
 
 class APIKeyAuthentication(BaseAuthentication):
@@ -124,7 +133,8 @@ def submit_message(request):
         thinking_time=data['thinking_time']
     )
     
-    # Notify browser extension via WebSocket
+    # Broadcast to ALL connected browser extensions for this account via WebSocket
+    # All extensions connected with this account's API key will receive this request
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         f"account_{account.id}",
@@ -366,4 +376,69 @@ def get_chat(request, chat_id):
     chat = get_object_or_404(Chat, chat_id=chat_id, account=account)
     
     serializer = ChatSerializer(chat)
+    return Response(serializer.data)
+
+
+@extend_schema(
+    tags=['Chat'],
+    summary='Get next available idle request',
+    description=(
+        'Retrieve the next available idle message request that needs processing. '
+        'Returns the oldest idle request that has either never been retrieved or was retrieved longest ago. '
+        'Updates the last_retrieved_at timestamp when fetched.'
+    ),
+    responses={
+        200: MessageRequestSerializer,
+        204: OpenApiTypes.OBJECT,
+        401: OpenApiTypes.OBJECT,
+    },
+    examples=[
+        OpenApiExample(
+            'Available Request',
+            value={
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "message": "Explain quantum computing",
+                "response_type": "thinking",
+                "thinking_time": "extended",
+                "status": "idle",
+                "response": None,
+                "error_message": None,
+                "chat": {
+                    "id": 1,
+                    "chat_id": None,
+                    "title": None,
+                    "created_at": "2024-01-15T10:30:00Z",
+                    "updated_at": "2024-01-15T10:30:00Z"
+                },
+                "queued_at": "2024-01-15T10:30:00Z",
+                "started_at": None,
+                "completed_at": None,
+                "last_retrieved_at": "2024-01-15T10:30:05Z"
+            },
+            response_only=True,
+        ),
+    ],
+)
+@api_view(['GET'])
+@authentication_classes([APIKeyAuthentication])
+def get_next_idle_request(request):
+    """Get the next available idle request for processing"""
+    account = request.user
+    
+    # Get the oldest idle request (prioritize never-retrieved, then oldest retrieved)
+    idle_request = MessageRequest.objects.filter(
+        account=account,
+        status=MessageRequest.Status.IDLE
+    ).order_by('last_retrieved_at', 'queued_at').first()
+    
+    if not idle_request:
+        return Response(
+            {"message": "No idle requests available"},
+            status=status.HTTP_204_NO_CONTENT
+        )
+    
+    # Mark as retrieved
+    idle_request.mark_retrieved()
+    
+    serializer = MessageRequestSerializer(idle_request)
     return Response(serializer.data)

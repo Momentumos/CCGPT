@@ -131,27 +131,43 @@ class BrowserExtensionConsumer(AsyncWebsocketConsumer):
         except GPTAccount.DoesNotExist:
             return None
     
-    @database_sync_to_async
-    def send_pending_requests(self):
+    async def send_pending_requests(self):
         """Send all pending (idle) requests to the browser extension"""
+        pending_requests = await self.get_pending_requests()
+        
+        for req_data in pending_requests:
+            await self.channel_layer.group_send(
+                self.account_group_name,
+                {
+                    "type": "new_message_request",
+                    "request_id": req_data['id'],
+                    "message": req_data['message'],
+                    "response_type": req_data['response_type'],
+                    "thinking_time": req_data['thinking_time'],
+                    "chat_id": req_data['chat_id'],
+                    "chat_db_id": req_data['chat_db_id'],
+                }
+            )
+    
+    @database_sync_to_async
+    def get_pending_requests(self):
+        """Get all pending requests from database"""
         pending_requests = MessageRequest.objects.filter(
             account=self.account,
             status=MessageRequest.Status.IDLE
         ).select_related('chat').order_by('queued_at')
         
-        for req in pending_requests:
-            self.channel_layer.group_send(
-                self.account_group_name,
-                {
-                    "type": "new_message_request",
-                    "request_id": str(req.id),
-                    "message": req.message,
-                    "response_type": req.response_type,
-                    "thinking_time": req.thinking_time,
-                    "chat_id": req.chat.chat_id if req.chat else None,
-                    "chat_db_id": req.chat.id if req.chat else None,
-                }
-            )
+        return [
+            {
+                'id': str(req.id),
+                'message': req.message,
+                'response_type': req.response_type,
+                'thinking_time': req.thinking_time,
+                'chat_id': req.chat.chat_id if req.chat else None,
+                'chat_db_id': req.chat.id if req.chat else None,
+            }
+            for req in pending_requests
+        ]
     
     @database_sync_to_async
     def update_request_executing(self, request_id):

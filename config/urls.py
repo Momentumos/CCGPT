@@ -19,10 +19,20 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+from chat.views import health_check
+from chat.client_views import client_app
+from chat.webhook_views import webhook_receiver, sse_stream
 
 urlpatterns = [
+    path("", client_app, name="home"),
+    path("client/", client_app, name="client_app"),
+    path("health/", health_check, name="health_check"),
     path("admin/", admin.site.urls),
     path("api/chat/", include('chat.urls')),
+    
+    # Webhook and SSE endpoints
+    path("api/webhooks/chatgpt/", webhook_receiver, name="webhook_receiver"),
+    path("api/sse/<str:request_id>/", sse_stream, name="sse_stream"),
     
     # API Documentation
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),

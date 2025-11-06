@@ -1,0 +1,102 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatGPT Bridge Client</title>
+    <link rel="stylesheet" href="{% static 'client/css/style.css' %}">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <h1>🤖 ChatGPT Bridge</h1>
+            <p class="subtitle">Enter your API key to continue</p>
+            
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="api-key">API Key</label>
+                    <input 
+                        type="password" 
+                        id="api-key" 
+                        placeholder="Enter your API key"
+                        required
+                    >
+                </div>
+                
+                <button type="submit" class="btn btn-primary">
+                    Connect
+                </button>
+            </form>
+            
+            <div id="login-error" class="error-message" style="display: none;"></div>
+            
+            <div class="help-text">
+                <p>Don't have an API key?</p>
+                <a href="/admin/" target="_blank">Get one from the admin panel</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Screen -->
+    <div id="chat-screen" class="screen">
+        <div class="chat-container">
+            <!-- Header -->
+            <div class="chat-header">
+                <div class="header-left">
+                    <h2>ChatGPT Bridge</h2>
+                    <span id="chat-status" class="status-badge">Connected</span>
+                </div>
+                <div class="header-right">
+                    <button id="new-chat-btn" class="btn btn-secondary">New Chat</button>
+                    <button id="logout-btn" class="btn btn-secondary">Logout</button>
+                </div>
+            </div>
+
+            <!-- Messages Area -->
+            <div id="messages-container" class="messages-container">
+                <div class="welcome-message">
+                    <h3>👋 Welcome to ChatGPT Bridge</h3>
+                    <p>Start a conversation by typing a message below.</p>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="message-input" 
+                        placeholder="Type your message here..."
+                        rows="1"
+                    ></textarea>
+                    <button id="send-btn" class="btn btn-send">
+                        <span class="send-icon">➤</span>
+                    </button>
+                </div>
+                
+                <div class="input-options">
+                    <div class="option-group">
+                        <label>Response Type:</label>
+                        <select id="response-type">
+                            <option value="auto">Auto</option>
+                            <option value="thinking">Thinking</option>
+                            <option value="instant">Instant</option>
+                        </select>
+                    </div>
+                    
+                    <div class="option-group">
+                        <label>Thinking Time:</label>
+                        <select id="thinking-time">
+                            <option value="standard">Standard</option>
+                            <option value="extended">Extended</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{% static 'client/js/app.js' %}"></script>
+</body>
+</html>

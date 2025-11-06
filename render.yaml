@@ -23,7 +23,7 @@ services:
     branch: main
     buildCommand: "./build.sh"
     startCommand: "daphne -b 0.0.0.0 -p $PORT config.asgi:application"
-    healthCheckPath: /admin/login/
+    healthCheckPath: /health/
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
