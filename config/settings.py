@@ -90,14 +90,27 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 # Channels configuration
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [(config('REDIS_HOST', default='redis'), config('REDIS_PORT', default=6379, cast=int))],
+REDIS_URL = os.environ.get('REDIS_URL')
+if REDIS_URL:
+    # Render Redis URL format
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
         },
-    },
-}
+    }
+else:
+    # Local development
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [(config('REDIS_HOST', default='redis'), config('REDIS_PORT', default=6379, cast=int))],
+            },
+        },
+    }
 
 
 # Database
@@ -185,6 +198,18 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all origins in development
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
 
+# Security Settings for Production
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    X_FRAME_OPTIONS = 'DENY'
+
 # Django REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
@@ -205,6 +230,7 @@ SPECTACULAR_SETTINGS = {
     'SCHEMA_PATH_PREFIX': '/api/',
     'SERVERS': [
         {'url': 'http://localhost:8000', 'description': 'Local Development'},
+        {'url': os.environ.get('RENDER_EXTERNAL_URL', ''), 'description': 'Production'} if os.environ.get('RENDER_EXTERNAL_URL') else None,
     ],
     'TAGS': [
         {'name': 'Chat', 'description': 'Message request and chat management endpoints'},

@@ -151,14 +151,36 @@ These provide:
 
 ## 🔒 Production Deployment
 
-For production:
-1. Set `DEBUG=False` in `.env`
+### Deploy to Render.com (Recommended)
+
+This project is ready to deploy on Render.com with one click:
+
+1. **Quick Deploy**: See [RENDER_DEPLOYMENT.md](RENDER_DEPLOYMENT.md) for detailed guide
+2. **Checklist**: Use [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md) to verify deployment
+
+**Key Files for Render:**
+- `render.yaml` - Infrastructure as code
+- `build.sh` - Build script
+- `runtime.txt` - Python version
+
+**What's Included:**
+- ✅ PostgreSQL database (free tier)
+- ✅ Redis instance (free tier)
+- ✅ ASGI server (Daphne)
+- ✅ Automatic SSL
+- ✅ Auto-deploy on push
+- ✅ Environment variable management
+
+### Manual Production Deployment
+
+For other platforms:
+1. Set `DEBUG=False` in environment
 2. Generate a strong `SECRET_KEY`
 3. Update `ALLOWED_HOSTS` with your domain
 4. Use strong database credentials
 5. Configure proper CORS settings
 6. Set up a reverse proxy (nginx)
-7. Use a production WSGI server (gunicorn)
+7. Use Daphne for ASGI support
 
 ## 🔌 System Architecture
 
