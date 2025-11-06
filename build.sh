@@ -11,3 +11,6 @@ python manage.py collectstatic --no-input
 
 # Run migrations
 python manage.py migrate
+
+# Create superuser if none exists
+python manage.py create_superuser_if_none
