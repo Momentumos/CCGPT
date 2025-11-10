@@ -22,13 +22,16 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, Sp
 from chat.views import health_check
 from chat.client_views import client_app
 from chat.webhook_views import webhook_receiver, sse_stream
+from market.client_views import market_app
 
 urlpatterns = [
     path("", client_app, name="home"),
     path("client/", client_app, name="client_app"),
+    path("market/", market_app, name="market_app"),
     path("health/", health_check, name="health_check"),
     path("admin/", admin.site.urls),
     path("api/chat/", include('chat.urls')),
+    path("api/market/", include('market.urls')),
     
     # Webhook and SSE endpoints
     path("api/webhooks/chatgpt/", webhook_receiver, name="webhook_receiver"),

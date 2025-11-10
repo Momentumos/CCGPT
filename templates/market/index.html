@@ -1,0 +1,166 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Analysis Visualization</title>
+    <link rel="stylesheet" href="{% static 'market/css/style.css' %}">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <h1>📊 Market Analysis</h1>
+            <p class="subtitle">Hierarchical Market Segmentation with AI</p>
+            
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="api-key">API Key</label>
+                    <input 
+                        type="password" 
+                        id="api-key" 
+                        placeholder="Enter your API key"
+                        required
+                    >
+                </div>
+                
+                <button type="submit" class="btn btn-primary">
+                    Connect
+                </button>
+            </form>
+            
+            <div id="login-error" class="error-message" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- Main Screen -->
+    <div id="main-screen" class="screen">
+        <div class="container">
+            <!-- Header -->
+            <div class="header">
+                <div class="header-left">
+                    <h1>📊 Market Analysis</h1>
+                </div>
+                <div class="header-right">
+                    <button id="new-analysis-btn" class="btn btn-primary">New Analysis</button>
+                    <button id="logout-btn" class="btn btn-secondary">Logout</button>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div class="content">
+                <!-- Sidebar -->
+                <div class="sidebar">
+                    <h3>Your Markets</h3>
+                    <div id="markets-list" class="markets-list">
+                        <div class="empty-state">
+                            <p>No markets analyzed yet.</p>
+                            <p>Click "New Analysis" to start.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visualization Area -->
+                <div class="main-content">
+                    <div id="welcome-view" class="view active">
+                        <div class="welcome-message">
+                            <h2>Welcome to Market Analysis</h2>
+                            <p>Analyze markets hierarchically using AI-powered economic segmentation.</p>
+                            <ul>
+                                <li>📈 MECE (Mutually Exclusive, Collectively Exhaustive) sub-markets</li>
+                                <li>💰 Value Added (GDP concept) measurements</li>
+                                <li>👥 Employment data for each segment</li>
+                                <li>🌳 4-level deep hierarchical analysis</li>
+                            </ul>
+                            <button id="start-btn" class="btn btn-primary btn-large">Start New Analysis</button>
+                        </div>
+                    </div>
+
+                    <div id="visualization-view" class="view">
+                        <div class="viz-header">
+                            <h2 id="viz-title">Market Name</h2>
+                            <div class="viz-controls">
+                                <button id="refresh-btn" class="btn btn-secondary">Refresh</button>
+                                <button id="export-btn" class="btn btn-secondary">Export Data</button>
+                            </div>
+                        </div>
+                        
+                        <div class="viz-stats">
+                            <div class="stat-card">
+                                <div class="stat-label">Total Value Added</div>
+                                <div class="stat-value" id="total-value">$0</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Total Employment</div>
+                                <div class="stat-value" id="total-employment">0</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Sub-markets</div>
+                                <div class="stat-value" id="total-submarkets">0</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-label">Analysis Status</div>
+                                <div class="stat-value" id="analysis-status">Pending</div>
+                            </div>
+                        </div>
+
+                        <div id="tree-visualization" class="tree-container"></div>
+                        
+                        <div id="details-panel" class="details-panel">
+                            <h3>Market Details</h3>
+                            <div id="details-content">
+                                <p>Select a market node to view details</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Analysis Modal -->
+    <div id="new-analysis-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>New Market Analysis</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="new-analysis-form">
+                    <div class="form-group">
+                        <label for="market-titles">Market Names (one per line)</label>
+                        <textarea 
+                            id="market-titles" 
+                            rows="5"
+                            placeholder="AI Market&#10;Fitness Market&#10;E-commerce Market"
+                            required
+                        ></textarea>
+                        <small>Enter one or more market names to analyze. Each will be analyzed separately.</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="max-depth">Analysis Depth</label>
+                        <select id="max-depth">
+                            <option value="0">Level 0 only (no sub-markets)</option>
+                            <option value="1">Level 0 + Level 1</option>
+                            <option value="2">Level 0, 1, 2</option>
+                            <option value="3" selected>Full depth (Level 0, 1, 2, 3)</option>
+                        </select>
+                        <small>Deeper analysis takes longer but provides more detail.</small>
+                    </div>
+                    
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Start Analysis</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="{% static 'market/js/app.js' %}"></script>
+    <script src="{% static 'market/js/visualization.js' %}"></script>
+</body>
+</html>

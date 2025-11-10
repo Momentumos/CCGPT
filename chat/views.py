@@ -15,7 +15,7 @@ from drf_spectacular.types import OpenApiTypes
 
 
 def health_check(request):
-    """Health check endpoint for monitoring services like Render.com"""
+    """Health check endpoint for monitoring services"""
     return JsonResponse({
         "status": "healthy",
         "service": "CCGPT API"

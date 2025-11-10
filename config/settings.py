@@ -30,11 +30,6 @@ DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
-# Add Render.com domain
-RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
-if RENDER_EXTERNAL_HOSTNAME:
-    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
-
 
 # Application definition
 
@@ -54,6 +49,7 @@ INSTALLED_APPS = [
     # Local apps
     "account",
     "chat",
+    "market",
 ]
 
 MIDDLEWARE = [
@@ -92,7 +88,6 @@ ASGI_APPLICATION = "config.asgi.application"
 # Channels configuration
 REDIS_URL = os.environ.get('REDIS_URL')
 if REDIS_URL:
-    # Render Redis URL format
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
@@ -116,7 +111,6 @@ else:
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-# Use DATABASE_URL from Render if available, otherwise use individual settings
 DATABASE_URL = os.environ.get('DATABASE_URL')
 if DATABASE_URL:
     DATABASES = {
@@ -236,7 +230,6 @@ SPECTACULAR_SETTINGS = {
     'SCHEMA_PATH_PREFIX': '/api/',
     'SERVERS': [
         {'url': 'http://localhost:8000', 'description': 'Local Development'},
-        {'url': os.environ.get('RENDER_EXTERNAL_URL', ''), 'description': 'Production'} if os.environ.get('RENDER_EXTERNAL_URL') else None,
     ],
     'TAGS': [
         {'name': 'Chat', 'description': 'Message request and chat management endpoints'},
