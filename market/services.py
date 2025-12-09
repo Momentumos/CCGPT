@@ -190,9 +190,10 @@ class MarketAnalysisService:
             ids.extend(self._get_descendant_ids(child))
         return ids
     
-    def _analyze_node(self, node, is_root=False):
+    def _analyze_node(self, node, is_root=False, max_retries=3):
         """
         Analyze a single node by creating a chat request and waiting for response
+        Includes retry logic with exponential backoff
         """
         node.mark_analyzing()
         
@@ -309,18 +310,49 @@ You are given a JSON input describing the current node and constraints:
 
 {json.dumps(input_json, indent=2)}"""
         
-        # Create chat and submit message
-        chat = Chat.objects.create(account=self.account)
-        
-        message_request = MessageRequest.objects.create(
-            account=self.account,
-            chat=chat,
-            message=prompt,
-            response_type=MessageRequest.ResponseType.THINKING,
-            thinking_time=MessageRequest.ThinkingTime.EXTENDED
-        )
-        
-        print(f"[Market Analysis] Started analysis for '{node.title}' (Level {node.level}) - Request ID: {message_request.id}")
+        # Check if node already has a MessageRequest (retry scenario)
+        if node.message_request:
+            message_request = node.message_request
+            chat = message_request.chat
+            
+            # If the existing request is FAILED or stuck, we can retry
+            if message_request.status in [MessageRequest.Status.FAILED, MessageRequest.Status.IDLE]:
+                print(f"[Market Analysis] Retrying node '{node.title}' (Level {node.level}) - Retry #{node.retry_count + 1}")
+                node.retry_count += 1
+                node.save(update_fields=['retry_count'])
+                
+                # Check if we've exceeded max retries
+                if node.retry_count > max_retries:
+                    print(f"[Market Analysis] ✗ Max retries ({max_retries}) exceeded for '{node.title}'")
+                    node.mark_failed()
+                    return False
+                
+                # Reset the message request to IDLE so it can be picked up again
+                message_request.status = MessageRequest.Status.IDLE
+                message_request.error_message = None
+                message_request.save(update_fields=['status', 'error_message'])
+            elif message_request.status == MessageRequest.Status.DONE:
+                print(f"[Market Analysis] Node '{node.title}' already has completed MessageRequest, skipping")
+                return True
+            else:
+                print(f"[Market Analysis] Resuming existing request for '{node.title}' (Status: {message_request.status})")
+        else:
+            # Create new chat and submit message
+            chat = Chat.objects.create(account=self.account)
+            
+            message_request = MessageRequest.objects.create(
+                account=self.account,
+                chat=chat,
+                message=prompt,
+                response_type=MessageRequest.ResponseType.THINKING,
+                thinking_time=MessageRequest.ThinkingTime.EXTENDED
+            )
+            
+            # Link the MessageRequest to the node
+            node.message_request = message_request
+            node.save(update_fields=['message_request'])
+            
+            print(f"[Market Analysis] Started analysis for '{node.title}' (Level {node.level}) - Request ID: {message_request.id}")
         
         # Broadcast to browser extension via WebSocket
         from channels.layers import get_channel_layer
@@ -361,9 +393,14 @@ You are given a JSON input describing the current node and constraints:
                 
                 # Parse response
                 response_text = message_request.response
-                analysis_data = self._parse_llm_response(response_text)
+                analysis_data, cleaned_json = self._parse_llm_response(response_text, return_cleaned_json=True)
                 
                 if analysis_data:
+                    # Save cleaned JSON back to MessageRequest
+                    if cleaned_json and cleaned_json != response_text:
+                        message_request.response = cleaned_json
+                        message_request.save(update_fields=['response'])
+                        print(f"[Market Analysis] ✓ Saved cleaned JSON back to MessageRequest")
                     # Add metadata
                     analysis_data['metadata'] = {
                         'analysis_date': timezone.now().isoformat(),
@@ -372,19 +409,29 @@ You are given a JSON input describing the current node and constraints:
                         'request_id': str(message_request.id)
                     }
                     
-                    # Update node
-                    node.mark_completed(analysis_data)
+                    # Update node with validation
+                    try:
+                        node.mark_completed(analysis_data)
+                        print(f"[Market Analysis] ✓ Node '{node.title}' marked as completed")
+                    except Exception as e:
+                        print(f"[Market Analysis] ✗ Failed to mark node completed: {e}")
+                        node.mark_failed()
+                        return False
                     
                     # Create child nodes if not at max depth
                     if node.level < 3:
-                        children = node.create_child_nodes()
-                        print(f"[Market Analysis] Created {len(children)} child nodes for '{node.title}'")
-                        
-                        # Update job total_nodes count
-                        job = node.jobs.first() or node.parent.jobs.first() if node.parent else None
-                        if job:
-                            job.total_nodes += len(children)
-                            job.save()
+                        try:
+                            children = node.create_child_nodes()
+                            print(f"[Market Analysis] Created {len(children)} child nodes for '{node.title}'")
+                            
+                            # Update job total_nodes count
+                            job = node.jobs.first() or node.parent.jobs.first() if node.parent else None
+                            if job:
+                                job.total_nodes += len(children)
+                                job.save()
+                        except Exception as e:
+                            print(f"[Market Analysis] ✗ Failed to create child nodes: {e}")
+                            # Don't fail the node, it's already completed
                     
                     # Update job completed count
                     job = node.jobs.first() or (node.parent.jobs.first() if node.parent else None)
@@ -402,16 +449,33 @@ You are given a JSON input describing the current node and constraints:
                 elapsed_time = (poll_count * 5) / 60
                 error_msg = message_request.error_message or "Unknown error"
                 print(f"[Market Analysis] ✗ Failed '{node.title}' (Level {node.level}) after {elapsed_time:.1f} minutes - Error: {error_msg}")
-                node.mark_failed()
-                return False
+                
+                # Check if we should retry
+                if node.retry_count < max_retries:
+                    retry_delay = min(300, 30 * (2 ** node.retry_count))  # Exponential backoff: 30s, 60s, 120s, max 300s
+                    print(f"[Market Analysis] Will retry in {retry_delay} seconds (Retry #{node.retry_count + 1}/{max_retries})")
+                    time.sleep(retry_delay)
+                    return self._analyze_node(node, is_root=is_root, max_retries=max_retries)
+                else:
+                    print(f"[Market Analysis] ✗ Max retries ({max_retries}) exceeded for '{node.title}'")
+                    node.mark_failed()
+                    return False
             
             # Wait before polling again (check every 5 seconds to reduce load)
             time.sleep(5)
     
-    def _parse_llm_response(self, response_text):
+    def _parse_llm_response(self, response_text, return_cleaned_json=False):
         """
         Parse LLM response and extract JSON data
         Handles the new detailed prompt format
+        
+        Args:
+            response_text: Raw response from LLM
+            return_cleaned_json: If True, returns (parsed_data, cleaned_json_text) tuple
+        
+        Returns:
+            If return_cleaned_json=False: parsed_data dict or None
+            If return_cleaned_json=True: (parsed_data dict or None, cleaned_json_text or None)
         """
         try:
             # Try to find JSON in the response
@@ -428,6 +492,14 @@ You are given a JSON input describing the current node and constraints:
                 text = text.replace('```json', '').replace('```', '').strip()
                 print(f"[Parser] Removed markdown, new length: {len(text)} chars")
             
+            # Remove common LLM artifacts (e.g., "jsonCopy code", "json\nCopy code")
+            artifacts = ['jsonCopy code', 'json\nCopy code', 'json Copy code', 'Copy code']
+            for artifact in artifacts:
+                if text.startswith(artifact):
+                    text = text[len(artifact):].strip()
+                    print(f"[Parser] Removed artifact '{artifact}', new length: {len(text)} chars")
+                    break
+            
             # Try to find JSON if there's extra text
             if not text.startswith('{'):
                 # Look for the first {
@@ -436,10 +508,89 @@ You are given a JSON input describing the current node and constraints:
                     text = text[start_idx:]
                     print(f"[Parser] Found JSON starting at position {start_idx}")
             
-            # Parse JSON
-            print(f"[Parser] Attempting to parse JSON...")
-            data = json.loads(text)
-            print(f"[Parser] Successfully parsed JSON with keys: {list(data.keys())}")
+            # Try to parse as-is first (maybe it's already valid)
+            try:
+                data = json.loads(text)
+                print(f"[Parser] JSON is already valid, no fixes needed")
+                cleaned_json_text = text
+                # Skip to validation section
+            except json.JSONDecodeError as first_error:
+                print(f"[Parser] Initial parse failed: {first_error.msg} at position {first_error.pos}")
+                
+                # Now try fixes
+                original_text = text
+                fixes_applied = []
+                
+                # Fix 1: Remove trailing text after the last }
+                # Only remove if it's clearly non-JSON text (no JSON structural characters)
+                if '{' in text:
+                    last_brace = text.rfind('}')
+                    if last_brace != -1 and last_brace < len(text) - 1:
+                        trailing_text = text[last_brace + 1:].strip()
+                        # Only remove if it looks like conversational text (no JSON structural chars)
+                        # Allow whitespace but not: {}[]":,
+                        if trailing_text and not any(c in trailing_text for c in '{}[]":,'):
+                            # Extra safety: verify the JSON without trailing text is valid
+                            test_text = text[:last_brace + 1]
+                            try:
+                                json.loads(test_text)
+                                text = test_text
+                                fixes_applied.append(f"removed trailing text: '{trailing_text[:30]}...'")
+                            except json.JSONDecodeError:
+                                # Don't remove if it breaks the JSON
+                                print(f"[Parser] Skipping trailing text removal - would break JSON")
+                
+                # Fix 2: Check bracket balance
+                open_brackets = text.count('[')
+                close_brackets = text.count(']')
+                open_braces = text.count('{')
+                close_braces = text.count('}')
+                
+                if open_brackets != close_brackets or open_braces != close_braces:
+                    print(f"[Parser] Bracket imbalance: [ {open_brackets}/{close_brackets}, {{ {open_braces}/{close_braces}")
+                    
+                    # Fix 2a: Simple array bracket fix (only for primitive arrays)
+                    # Pattern: [primitive_values} where primitive means no nested brackets
+                    import re
+                    test_text = re.sub(r'\[([^\[\]{}]*?)\}', r'[\1]', text)
+                    
+                    # Test if this fix helps
+                    try:
+                        json.loads(test_text)
+                        text = test_text
+                        fixes_applied.append("fixed simple array brackets")
+                    except json.JSONDecodeError:
+                        # Fix didn't help, try more aggressive approach
+                        if open_brackets > close_brackets and open_braces > close_braces:
+                            # Both brackets and braces are unclosed - likely truncated JSON
+                            print(f"[Parser] JSON appears truncated, cannot safely fix")
+                        elif open_brackets > close_brackets:
+                            # More [ than ] - try replacing trailing } with ]
+                            deficit = open_brackets - close_brackets
+                            test_text = text
+                            for _ in range(min(deficit, 3)):  # Limit to 3 replacements max
+                                last_brace_pos = test_text.rfind('}')
+                                if last_brace_pos != -1:
+                                    test_text = test_text[:last_brace_pos] + ']' + test_text[last_brace_pos + 1:]
+                            
+                            # Test if this fix works
+                            try:
+                                json.loads(test_text)
+                                text = test_text
+                                fixes_applied.append(f"replaced {deficit} trailing }} with ]")
+                            except json.JSONDecodeError:
+                                print(f"[Parser] Bracket replacement didn't fix the JSON")
+                
+                if fixes_applied:
+                    print(f"[Parser] Applied fixes: {', '.join(fixes_applied)}")
+                
+                # Final parse attempt
+                data = json.loads(text)
+                cleaned_json_text = text
+                print(f"[Parser] Successfully parsed JSON after fixes")
+            
+            # Validation section
+            print(f"[Parser] Validating JSON structure with keys: {list(data.keys())}")
             
             # Validate structure - new format has 'parent' and 'children' keys
             if 'parent' in data and 'children' in data:
@@ -481,21 +632,28 @@ You are given a JSON input describing the current node and constraints:
                     'notes': notes
                 }
                 print(f"[Parser] ✓ Successfully parsed new format")
+                if return_cleaned_json:
+                    return result, cleaned_json_text
                 return result
             
             # Fallback: old simple format
             elif 'market_name' in data or 'total_value_added_usd' in data:
                 print(f"[Parser] Detected old format")
-                return {
+                result = {
                     'value_added_usd': data.get('total_value_added_usd', 0),
                     'employment_count': data.get('total_employment', 0),
                     'rationale': data.get('rationale', ''),
                     'sub_markets': data.get('sub_markets', [])
                 }
+                if return_cleaned_json:
+                    return result, cleaned_json_text
+                return result
             
             else:
                 print(f"[Parser] ERROR: Unexpected JSON structure with keys: {list(data.keys())}")
                 print(f"[Parser] Full data: {json.dumps(data, indent=2)[:500]}...")
+                if return_cleaned_json:
+                    return None, None
                 return None
             
         except json.JSONDecodeError as e:
@@ -504,10 +662,14 @@ You are given a JSON input describing the current node and constraints:
             print(f"[Parser] Response text (first 1000 chars):")
             print(response_text[:1000])
             print("...")
+            if return_cleaned_json:
+                return None, None
             return None
         except (KeyError, ValueError, TypeError) as e:
             print(f"[Parser] ERROR: {type(e).__name__}: {e}")
             print(f"[Parser] Response text (first 500 chars): {response_text[:500]}...")
+            if return_cleaned_json:
+                return None, None
             return None
     
     def get_tree_data(self, root_node):
@@ -515,6 +677,13 @@ You are given a JSON input describing the current node and constraints:
         Get hierarchical tree data for visualization
         """
         def build_tree(node):
+            # Clean data by removing metadata and llm_response
+            clean_data = node.data.copy() if node.data else {}
+            if 'metadata' in clean_data:
+                del clean_data['metadata']
+            if 'llm_response' in clean_data:
+                del clean_data['llm_response']
+            
             return {
                 'id': str(node.id),
                 'name': node.title,
@@ -522,7 +691,7 @@ You are given a JSON input describing the current node and constraints:
                 'employment': node.employment,
                 'level': node.level,
                 'status': node.status,
-                'data': node.data,
+                'data': clean_data,
                 'children': [build_tree(child) for child in node.children.all()]
             }
         

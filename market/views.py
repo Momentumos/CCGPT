@@ -10,6 +10,7 @@ from .serializers import (
 )
 from .services import MarketAnalysisService
 import threading
+import csv
 
 
 @api_view(['POST'])
@@ -170,3 +171,160 @@ def delete_node(request, node_id):
         {"message": "Node and its children deleted successfully"},
         status=status.HTTP_204_NO_CONTENT
     )
+
+
+@api_view(['GET'])
+def export_all_nodes(request):
+    """
+    Export all market nodes as a single JSON file for visualization.
+    Returns a hierarchical structure with all root nodes and their complete trees.
+    No authentication required - returns all nodes from all accounts.
+    
+    Response format:
+    {
+        "metadata": {
+            "export_date": "...",
+            "total_nodes": 123,
+            "root_count": 5
+        },
+        "trees": [
+            {
+                "id": "...",
+                "title": "Market Name",
+                "level": 0,
+                "status": "completed",
+                "value_added": 1000000,
+                "employment": 5000,
+                "data": {...},
+                "created_at": "...",
+                "analyzed_at": "...",
+                "children": [...]
+            }
+        ]
+    }
+    """
+    from django.http import JsonResponse
+    from django.utils import timezone
+    import json
+    
+    # Get all root nodes from all accounts
+    root_nodes = MarketNode.objects.filter(level=0).order_by('created_at')
+    
+    # Build complete trees for each root
+    def build_node_data(node):
+        """Recursively build node data with all children"""
+        children = node.children.all().order_by('created_at')
+        
+        # Clean data by removing metadata
+        clean_data = node.data.copy() if node.data else {}
+        if 'metadata' in clean_data:
+            del clean_data['metadata']
+        
+        return {
+            'id': str(node.id),
+            'title': node.title,
+            'level': node.level,
+            'status': node.status,
+            'value_added': node.value_added,
+            'employment': node.employment,
+            'data': clean_data,
+            'created_at': node.created_at.isoformat() if node.created_at else None,
+            'updated_at': node.updated_at.isoformat() if node.updated_at else None,
+            'analyzed_at': node.analyzed_at.isoformat() if node.analyzed_at else None,
+            'retry_count': node.retry_count,
+            'children': [build_node_data(child) for child in children]
+        }
+    
+    # Build all trees
+    trees = [build_node_data(root) for root in root_nodes]
+    
+    # Count total nodes
+    total_nodes = MarketNode.objects.all().count()
+    
+    # Build response
+    response_data = {
+        'metadata': {
+            'export_date': timezone.now().isoformat(),
+            'total_nodes': total_nodes,
+            'root_count': len(trees),
+        },
+        'trees': trees
+    }
+    
+    # Return as downloadable JSON file
+    response = JsonResponse(response_data, json_dumps_params={'indent': 2})
+    response['Content-Disposition'] = f'attachment; filename="market_nodes_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.json"'
+    
+    return response
+
+
+@api_view(['GET'])
+@authentication_classes([APIKeyAuthentication])
+def export_tree_csv(request, root_node_id):
+    """
+    Export a single market tree as CSV file.
+    Returns a flat CSV with one row per node, including hierarchical information.
+    
+    CSV Columns:
+    - ID, Title, Level, Status, Value Added, Employment, Parent ID, Parent Title, 
+      Created At, Updated At, Analyzed At, Retry Count
+    """
+    from django.http import HttpResponse
+    from django.utils import timezone
+    
+    account = request.user
+    root_node = get_object_or_404(
+        MarketNode, 
+        id=root_node_id, 
+        account=account,
+        level=0
+    )
+    
+    # Create CSV response
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="{root_node.title.replace(" ", "_")}_export_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+    
+    writer = csv.writer(response)
+    
+    # Write header
+    writer.writerow([
+        'ID',
+        'Title',
+        'Level',
+        'Status',
+        'Value Added',
+        'Employment',
+        'Parent ID',
+        'Parent Title',
+        'Created At',
+        'Updated At',
+        'Analyzed At',
+        'Retry Count'
+    ])
+    
+    # Recursively collect all nodes
+    def write_node_and_children(node):
+        """Recursively write node and its children to CSV"""
+        writer.writerow([
+            str(node.id),
+            node.title,
+            node.level,
+            node.status,
+            node.value_added or 0,
+            node.employment or 0,
+            str(node.parent.id) if node.parent else '',
+            node.parent.title if node.parent else '',
+            node.created_at.isoformat() if node.created_at else '',
+            node.updated_at.isoformat() if node.updated_at else '',
+            node.analyzed_at.isoformat() if node.analyzed_at else '',
+            node.retry_count
+        ])
+        
+        # Write all children
+        for child in node.children.all().order_by('created_at'):
+            write_node_and_children(child)
+    
+    # Write root and all descendants
+    write_node_and_children(root_node)
+    
+    return response

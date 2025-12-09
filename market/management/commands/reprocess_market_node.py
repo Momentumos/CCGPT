@@ -36,21 +36,15 @@ class Command(BaseCommand):
                 message_request = MessageRequest.objects.get(id=request_id)
                 self.stdout.write(f"Using specified MessageRequest: {message_request.id}")
             else:
-                # Find the most recent DONE request for this node's chat
-                # We'll look for requests with the node title in the message
-                message_requests = MessageRequest.objects.filter(
-                    status=MessageRequest.Status.DONE,
-                    message__icontains=node.title
-                ).order_by('-completed_at')
-                
-                if not message_requests.exists():
+                # Use the linked MessageRequest from the node
+                if node.message_request:
+                    message_request = node.message_request
+                    self.stdout.write(f"Using linked MessageRequest: {message_request.id} (Status: {message_request.status})")
+                else:
                     self.stdout.write(self.style.ERROR(
-                        f"No DONE MessageRequest found for node '{node.title}'"
+                        f"Node '{node.title}' has no linked MessageRequest. Use --request-id to specify one."
                     ))
                     return
-                
-                message_request = message_requests.first()
-                self.stdout.write(f"Found MessageRequest: {message_request.id}")
             
             # Check if response exists
             if not message_request.response:
@@ -65,12 +59,19 @@ class Command(BaseCommand):
             
             # Parse the response
             self.stdout.write("\nParsing response...")
-            analysis_data = service._parse_llm_response(message_request.response)
+            original_response = message_request.response
+            analysis_data, cleaned_json = service._parse_llm_response(message_request.response, return_cleaned_json=True)
             
             if not analysis_data:
                 self.stdout.write(self.style.ERROR("Failed to parse response!"))
                 self.stdout.write("Check the console output above for parsing errors.")
                 return
+            
+            # Save cleaned JSON back to MessageRequest if it changed
+            if cleaned_json and cleaned_json != original_response:
+                message_request.response = cleaned_json
+                message_request.save(update_fields=['response'])
+                self.stdout.write(self.style.SUCCESS("✓ Saved cleaned JSON back to MessageRequest"))
             
             self.stdout.write(self.style.SUCCESS("✓ Successfully parsed response"))
             self.stdout.write(f"  Value Added: ${analysis_data.get('value_added_usd', 0):,}")
@@ -81,7 +82,7 @@ class Command(BaseCommand):
             from django.utils import timezone
             analysis_data['metadata'] = {
                 'analysis_date': timezone.now().isoformat(),
-                'llm_response': message_request.response,
+                'llm_response': original_response,
                 'chat_id': message_request.chat.chat_id if message_request.chat else None,
                 'request_id': str(message_request.id),
                 'manually_reprocessed': True
@@ -89,24 +90,45 @@ class Command(BaseCommand):
             
             # Update the node
             self.stdout.write("\nUpdating node...")
-            node.mark_completed(analysis_data)
-            self.stdout.write(self.style.SUCCESS(f"✓ Node '{node.title}' marked as completed"))
+            
+            # If using a different MessageRequest, update the link first
+            if request_id and (not node.message_request or str(node.message_request.id) != request_id):
+                message_request_obj = MessageRequest.objects.get(id=request_id)
+                node.message_request = message_request_obj
+                node.save(update_fields=['message_request'])
+                self.stdout.write(f"✓ Updated node's MessageRequest link to {request_id}")
+            
+            try:
+                node.mark_completed(analysis_data)
+                self.stdout.write(self.style.SUCCESS(f"✓ Node '{node.title}' marked as completed"))
+            except Exception as e:
+                self.stdout.write(self.style.ERROR(f"Failed to mark node completed: {e}"))
+                return
             
             # Create child nodes if not at max depth
             if node.level < 3:
                 self.stdout.write("\nCreating child nodes...")
-                children = node.create_child_nodes()
-                self.stdout.write(self.style.SUCCESS(f"✓ Created {len(children)} child nodes"))
                 
-                for child in children:
-                    self.stdout.write(f"  - {child.title}")
-                
-                # Update job total_nodes count
-                job = node.jobs.first() or (node.parent.jobs.first() if node.parent else None)
-                if job:
-                    job.total_nodes += len(children)
-                    job.save()
-                    self.stdout.write(f"✓ Updated job total_nodes to {job.total_nodes}")
+                # Check if children already exist
+                existing_children = node.children.count()
+                if existing_children > 0:
+                    self.stdout.write(self.style.WARNING(f"Node already has {existing_children} child nodes. Skipping creation."))
+                else:
+                    try:
+                        children = node.create_child_nodes()
+                        self.stdout.write(self.style.SUCCESS(f"✓ Created {len(children)} child nodes"))
+                        
+                        for child in children:
+                            self.stdout.write(f"  - {child.title}")
+                        
+                        # Update job total_nodes count
+                        job = node.jobs.first() or (node.parent.jobs.first() if node.parent else None)
+                        if job:
+                            job.total_nodes += len(children)
+                            job.save()
+                            self.stdout.write(f"✓ Updated job total_nodes to {job.total_nodes}")
+                    except Exception as e:
+                        self.stdout.write(self.style.ERROR(f"Failed to create child nodes: {e}"))
             
             # Update job completed count
             job = node.jobs.first() or (node.parent.jobs.first() if node.parent else None)
@@ -122,6 +144,6 @@ class Command(BaseCommand):
         except MessageRequest.DoesNotExist:
             self.stdout.write(self.style.ERROR(f"MessageRequest with ID '{request_id}' not found"))
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"Error: {e}"))
+            self.stdout.write(self.style.ERROR(f"Error: {type(e).__name__}: {e}"))
             import traceback
             traceback.print_exc()

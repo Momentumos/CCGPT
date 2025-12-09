@@ -30,6 +30,17 @@ class MarketNode(models.Model):
     )
     level = models.IntegerField(default=0, help_text="Depth level: 0=root, 1=first level, 2=second level, 3=third level")
     
+    # Link to the MessageRequest that analyzed this node (strict one-to-one)
+    message_request = models.OneToOneField(
+        'chat.MessageRequest',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='market_node',
+        help_text="The MessageRequest used to analyze this node"
+    )
+    retry_count = models.IntegerField(default=0, help_text="Number of times this node has been retried")
+    
     # Status tracking
     status = models.CharField(
         max_length=20,
@@ -82,6 +93,25 @@ class MarketNode(models.Model):
     def __str__(self):
         return f"L{self.level}: {self.title} ({self.status})"
     
+    def save(self, *args, **kwargs):
+        """Override save to validate one-to-one relationship"""
+        from django.core.exceptions import ValidationError
+        
+        # If we're setting a message_request, ensure it's not already used by another node
+        if self.message_request_id:
+            # Check if another node is using this MessageRequest
+            existing = MarketNode.objects.filter(
+                message_request_id=self.message_request_id
+            ).exclude(id=self.id).first()
+            
+            if existing:
+                raise ValidationError(
+                    f"MessageRequest {self.message_request_id} is already assigned to node '{existing.title}' (ID: {existing.id}). "
+                    f"Each MessageRequest can only be linked to one MarketNode."
+                )
+        
+        super().save(*args, **kwargs)
+    
     @property
     def value_added(self):
         """Get value added from JSON data"""
@@ -105,6 +135,29 @@ class MarketNode(models.Model):
     def mark_completed(self, analysis_data):
         """Mark node as completed with analysis data"""
         from django.utils import timezone
+        from django.core.exceptions import ValidationError
+        
+        # Validate that we have a MessageRequest
+        if not self.message_request:
+            raise ValidationError("Cannot mark node as completed: no MessageRequest linked")
+        
+        # Validate that MessageRequest is DONE
+        if self.message_request.status != 'done':
+            raise ValidationError(
+                f"Cannot mark node as completed: MessageRequest status is '{self.message_request.status}', must be 'done'"
+            )
+        
+        # Validate that analysis_data has required fields
+        if not analysis_data:
+            raise ValidationError("Cannot mark node as completed: analysis_data is empty")
+        
+        required_fields = ['value_added_usd', 'employment_count']
+        missing_fields = [f for f in required_fields if f not in analysis_data]
+        if missing_fields:
+            raise ValidationError(
+                f"Cannot mark node as completed: analysis_data missing required fields: {missing_fields}"
+            )
+        
         self.status = self.Status.COMPLETED
         self.data = analysis_data
         self.analyzed_at = timezone.now()
@@ -120,6 +173,14 @@ class MarketNode(models.Model):
         Create child nodes from sub_markets in data.
         Returns list of created MarketNode instances.
         """
+        from django.core.exceptions import ValidationError
+        
+        # Validate node is completed before creating children
+        if self.status != self.Status.COMPLETED:
+            raise ValidationError(
+                f"Cannot create child nodes: parent node status is '{self.status}', must be 'completed'"
+            )
+        
         if self.level >= 3:  # Max depth is 3 (0, 1, 2, 3)
             return []
         

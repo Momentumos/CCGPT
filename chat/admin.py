@@ -47,48 +47,11 @@ class MessageRequestAdmin(admin.ModelAdmin):
     )
     
     def related_market_node_link(self, obj):
-        """Show link to related MarketNode if this is a market analysis request"""
-        from market.models import MarketNode
-        import json
-        import re
-        
-        # Strategy 1: Try to extract node name from JSON in the message
-        matching_nodes = []
-        
-        # Look for "name": "Node Title" pattern in the message
-        name_pattern = r'"name":\s*"([^"]+)"'
-        matches = re.findall(name_pattern, obj.message)
-        
-        if matches:
-            # Get the first name (usually the parent node)
-            node_title = matches[0]
+        """Show the ONE MarketNode linked to this MessageRequest via OneToOneField"""
+        try:
+            # Use the reverse OneToOneField relationship
+            node = obj.market_node
             
-            # Find nodes with this exact title
-            nodes = MarketNode.objects.filter(
-                account=obj.account,
-                title__iexact=node_title  # Case-insensitive exact match
-            ).order_by('-created_at')
-            
-            matching_nodes.extend(nodes[:5])
-        
-        # Strategy 2: Fallback - check if any node title appears in message
-        if not matching_nodes:
-            nodes = MarketNode.objects.filter(
-                account=obj.account
-            ).order_by('-created_at')
-            
-            for node in nodes[:50]:  # Check recent 50 nodes
-                # Use case-insensitive search
-                if node.title.lower() in obj.message.lower():
-                    matching_nodes.append(node)
-                    if len(matching_nodes) >= 5:
-                        break
-        
-        if not matching_nodes:
-            return "No related MarketNode found"
-        
-        links = []
-        for node in matching_nodes[:5]:  # Show top 5 matches
             url = reverse('admin:market_marketnode_change', args=[node.id])
             status_color = {
                 'pending': 'gray',
@@ -97,15 +60,19 @@ class MessageRequestAdmin(admin.ModelAdmin):
                 'failed': 'red'
             }.get(node.status, 'gray')
             
-            links.append(
-                f'<a href="{url}" style="color: {status_color}; margin-right: 10px;">'
-                f'{node.title} (Level {node.level}, {node.status})'
-                f'</a>'
+            return format_html(
+                '<a href="{}" style="color: {};">{} (Level {}, {})</a>',
+                url,
+                status_color,
+                node.title,
+                node.level,
+                node.status
             )
-        
-        return format_html('<br>'.join(links))
+        except:
+            # No MarketNode linked to this MessageRequest
+            return format_html('<span style="color: gray;">No MarketNode linked</span>')
     
-    related_market_node_link.short_description = 'Related MarketNode'
+    related_market_node_link.short_description = 'Linked MarketNode'
     
     def reprocess_market_node_action(self, request, queryset):
         """Admin action to reprocess market nodes from MessageRequests"""

@@ -63,9 +63,13 @@ class MarketAnalysisApp {
             }
         });
 
-        // Export button
-        document.getElementById('export-btn').addEventListener('click', () => {
-            this.exportData();
+        // Export buttons
+        document.getElementById('export-json-btn').addEventListener('click', () => {
+            this.exportDataJSON();
+        });
+        
+        document.getElementById('export-csv-btn').addEventListener('click', () => {
+            this.exportDataCSV();
         });
     }
 
@@ -326,7 +330,7 @@ class MarketAnalysisApp {
         }, 5000);
     }
 
-    exportData() {
+    exportDataJSON() {
         if (!this.currentRootNode) return;
 
         // Export as JSON
@@ -346,8 +350,43 @@ class MarketAnalysisApp {
             URL.revokeObjectURL(url);
         })
         .catch(error => {
-            console.error('Export error:', error);
-            alert('Failed to export data');
+            console.error('Export JSON error:', error);
+            alert('Failed to export JSON data');
+        });
+    }
+
+    exportDataCSV() {
+        if (!this.currentRootNode) return;
+
+        // Export as CSV - direct download from backend
+        const url = `${this.baseURL}/api/market/tree/${this.currentRootNode.id}/export-csv/`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.style.display = 'none';
+        
+        // Add API key as header by using fetch and creating blob
+        fetch(url, {
+            headers: {
+                'X-API-Key': this.apiKey,
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Export failed');
+            }
+            return response.blob();
+        })
+        .then(blob => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${this.currentRootNode.title.replace(/\s+/g, '_')}_analysis.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        })
+        .catch(error => {
+            console.error('Export CSV error:', error);
+            alert('Failed to export CSV data');
         });
     }
 

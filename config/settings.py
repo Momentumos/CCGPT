@@ -30,6 +30,14 @@ DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
+# Allow all ngrok-free.app subdomains
+if any(host.endswith('.ngrok-free.app') for host in ALLOWED_HOSTS):
+    # If any ngrok host is specified, add wildcard support
+    ALLOWED_HOSTS = list(ALLOWED_HOSTS) + ['.ngrok-free.app']
+elif DEBUG:
+    # In debug mode, automatically allow ngrok
+    ALLOWED_HOSTS = list(ALLOWED_HOSTS) + ['.ngrok-free.app']
+
 
 # Application definition
 
@@ -195,8 +203,27 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all origins in development
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
 
+# Add ngrok domains to CORS if in debug mode
+if DEBUG:
+    CORS_ALLOWED_ORIGIN_REGEXES = [
+        r"^https://.*\.ngrok-free\.app$",
+    ]
+
 # CSRF Settings
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='', cast=Csv())
+
+# Add ngrok domains to CSRF trusted origins
+if DEBUG:
+    # Automatically trust all ngrok-free.app subdomains in debug mode
+    CSRF_TRUSTED_ORIGINS = list(CSRF_TRUSTED_ORIGINS) + [
+        'https://*.ngrok-free.app',
+    ]
+else:
+    # In production, only trust explicitly configured ngrok domains
+    ngrok_origins = [origin for origin in CSRF_TRUSTED_ORIGINS if 'ngrok-free.app' in origin]
+    if ngrok_origins:
+        # Add wildcard support for any configured ngrok domain
+        CSRF_TRUSTED_ORIGINS = list(CSRF_TRUSTED_ORIGINS) + ['https://*.ngrok-free.app']
 
 # Security Settings for Production
 if not DEBUG:

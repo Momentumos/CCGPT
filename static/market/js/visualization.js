@@ -13,11 +13,11 @@ window.MarketVisualization = {
         const container = document.getElementById('tree-visualization');
         this.width = container.clientWidth;
         
-        // Calculate height based on number of nodes to prevent overlap
-        const nodeCount = this.countNodes(data);
-        const minHeightPerNode = 60; // Minimum vertical space per node
-        const calculatedHeight = Math.max(800, nodeCount * minHeightPerNode);
-        this.height = Math.min(calculatedHeight, 5000); // Cap at 5000px
+        // Calculate height based on leaf nodes (they need the most space)
+        const leafCount = this.countLeafNodes(data);
+        const minHeightPerLeaf = 25; // Minimum vertical space per leaf node
+        const calculatedHeight = Math.max(1200, leafCount * minHeightPerLeaf);
+        this.height = Math.min(calculatedHeight, 20000); // Cap at 20000px
 
         // Create SVG
         this.svg = d3.select('#tree-visualization')
@@ -25,12 +25,12 @@ window.MarketVisualization = {
             .attr('width', this.width)
             .attr('height', this.height);
 
-        // Create tree layout with increased vertical spacing
-        const treeLayout = d3.tree()
-            .size([this.height - 100, this.width - 200])
+        // Use cluster layout instead of tree - gives equal vertical spacing to leaves
+        const treeLayout = d3.cluster()
+            .size([this.height - 100, this.width - 400]) // More horizontal space for labels
             .separation((a, b) => {
-                // Increase vertical separation between nodes
-                return a.parent === b.parent ? 2 : 3;
+                // Ensure minimum separation
+                return 1;
             });
 
         // Create hierarchy
@@ -89,27 +89,22 @@ window.MarketVisualization = {
             .style('stroke-width', 2)
             .style('cursor', 'pointer');
 
-        // Add labels
+        // Add labels positioned to the right of nodes
         nodes.append('text')
-            .attr('dy', -15)
-            .attr('text-anchor', 'middle')
-            .style('font-size', '12px')
-            .style('font-weight', 'bold')
-            .style('fill', '#333')
-            .text(d => d.data.name);
-
-        // Add value labels
-        nodes.append('text')
-            .attr('dy', 25)
-            .attr('text-anchor', 'middle')
+            .attr('dx', 12) // Position to the right of the circle
+            .attr('dy', 4) // Slight vertical adjustment for centering
+            .attr('text-anchor', 'start') // Align text to start from the circle
             .style('font-size', '10px')
-            .style('fill', '#666')
+            .style('font-weight', '400')
+            .style('fill', '#333')
+            .style('pointer-events', 'none') // Don't interfere with click events
             .text(d => {
-                if (d.data.value) {
-                    return this.formatCurrency(d.data.value);
-                }
-                return '';
+                const text = d.data.name || d.data.title || '';
+                // Truncate long text to prevent overlap
+                return text.length > 60 ? text.substring(0, 57) + '...' : text;
             });
+
+        // Value labels removed per user request
 
         // Add legend
         this.addLegend();
@@ -237,6 +232,18 @@ window.MarketVisualization = {
                 count += this.countNodes(child);
             });
         }
+        return count;
+    },
+
+    countLeafNodes(node) {
+        // Count only leaf nodes (nodes without children)
+        if (!node.children || node.children.length === 0) {
+            return 1;
+        }
+        let count = 0;
+        node.children.forEach(child => {
+            count += this.countLeafNodes(child);
+        });
         return count;
     }
 };
