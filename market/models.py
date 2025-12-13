@@ -174,6 +174,7 @@ class MarketNode(models.Model):
         Returns list of created MarketNode instances.
         """
         from django.core.exceptions import ValidationError
+        from django.utils import timezone
         
         # Validate node is completed before creating children
         if self.status != self.Status.COMPLETED:
@@ -185,20 +186,39 @@ class MarketNode(models.Model):
             return []
         
         children = []
-        for sub_market in self.sub_markets:
-            child = MarketNode.objects.create(
-                account=self.account,
-                title=sub_market.get('name', 'Unnamed Market'),
-                parent=self,
-                level=self.level + 1,
-                status=self.Status.PENDING,
-                data={
-                    'value_added_usd': sub_market.get('value_added_usd', 0),
-                    'employment_count': sub_market.get('employment_count', 0),
-                    'rationale': sub_market.get('rationale', ''),
-                }
-            )
-            children.append(child)
+        child_level = self.level + 1
+        auto_complete_children = child_level >= 3
+        for i, sub_market in enumerate(self.sub_markets):
+            try:
+                if not isinstance(sub_market, dict):
+                    raise ValidationError(f"sub_markets[{i}] must be an object")
+
+                raw_title = sub_market.get('name') or 'Unnamed Market'
+                title = str(raw_title)[:self._meta.get_field('title').max_length]
+
+                employment_count = sub_market.get('employment_count', None)
+                if employment_count is None:
+                    employment_count = sub_market.get('employment', 0)
+
+                child = MarketNode.objects.create(
+                    account=self.account,
+                    title=title,
+                    parent=self,
+                    level=child_level,
+                    status=self.Status.COMPLETED if auto_complete_children else self.Status.PENDING,
+                    data={
+                        'value_added_usd': sub_market.get('value_added_usd', 0),
+                        'employment_count': employment_count,
+                        'rationale': sub_market.get('rationale', ''),
+                    }
+                )
+
+                if auto_complete_children:
+                    child.analyzed_at = timezone.now()
+                    child.save(update_fields=['analyzed_at'])
+                children.append(child)
+            except Exception as e:
+                print(f"[MarketNode] Failed creating child for '{self.title}' at sub_markets[{i}]: {type(e).__name__}: {e}")
         
         return children
 

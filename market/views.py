@@ -291,15 +291,10 @@ def export_tree_csv(request, root_node_id):
         'ID',
         'Title',
         'Level',
-        'Status',
         'Value Added',
         'Employment',
         'Parent ID',
         'Parent Title',
-        'Created At',
-        'Updated At',
-        'Analyzed At',
-        'Retry Count'
     ])
     
     # Recursively collect all nodes
@@ -309,15 +304,10 @@ def export_tree_csv(request, root_node_id):
             str(node.id),
             node.title,
             node.level,
-            node.status,
             node.value_added or 0,
             node.employment or 0,
             str(node.parent.id) if node.parent else '',
             node.parent.title if node.parent else '',
-            node.created_at.isoformat() if node.created_at else '',
-            node.updated_at.isoformat() if node.updated_at else '',
-            node.analyzed_at.isoformat() if node.analyzed_at else '',
-            node.retry_count
         ])
         
         # Write all children

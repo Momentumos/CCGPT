@@ -30,6 +30,9 @@ DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
+# Market analysis concurrency
+MARKET_ANALYSIS_MAX_WORKERS = max(1, config('MARKET_ANALYSIS_MAX_WORKERS', default=3, cast=int))
+
 # Allow all ngrok-free.app subdomains
 if any(host.endswith('.ngrok-free.app') for host in ALLOWED_HOSTS):
     # If any ngrok host is specified, add wildcard support

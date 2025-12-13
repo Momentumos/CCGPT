@@ -118,6 +118,7 @@ class Command(BaseCommand):
             
             # Process remaining levels
             from concurrent.futures import ThreadPoolExecutor, as_completed
+            from django.conf import settings
             
             for level in range(1, 4):  # Levels 1, 2, 3
                 # Collect all pending nodes at this level
@@ -149,7 +150,8 @@ class Command(BaseCommand):
                 self.stdout.write(f"Processing {node_count} nodes at level {level} in parallel...")
                 
                 # Process all nodes at this level in parallel
-                with ThreadPoolExecutor(max_workers=min(node_count, 10)) as executor:
+                max_workers = min(node_count, max(1, getattr(settings, 'MARKET_ANALYSIS_MAX_WORKERS', 3)))
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     # Submit all tasks
                     future_to_node = {
                         executor.submit(service._analyze_node, node): node 

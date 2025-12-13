@@ -70,6 +70,7 @@ class MarketAnalysisService:
         This should be called asynchronously or in a background task
         """
         from django.utils import timezone
+        from django.conf import settings
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
         job.status = MarketAnalysisJob.Status.RUNNING
@@ -114,7 +115,8 @@ class MarketAnalysisService:
                 print(f"[Job {job.id}] Processing {node_count} nodes at level {level} in parallel...")
                 
                 # Process all nodes at this level in parallel
-                with ThreadPoolExecutor(max_workers=min(node_count, 10)) as executor:
+                max_workers = min(node_count, max(1, getattr(settings, 'MARKET_ANALYSIS_MAX_WORKERS', 3)))
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     # Submit all tasks
                     future_to_node = {
                         executor.submit(self._analyze_node, node): node 
@@ -428,7 +430,14 @@ You are given a JSON input describing the current node and constraints:
                             job = node.jobs.first() or node.parent.jobs.first() if node.parent else None
                             if job:
                                 job.total_nodes += len(children)
-                                job.save()
+                                # If we auto-completed level-3 leaf nodes, count them as completed too
+                                auto_completed = sum(
+                                    1 for child in children
+                                    if child.level >= 3 and child.status == MarketNode.Status.COMPLETED
+                                )
+                                if auto_completed:
+                                    job.completed_nodes += auto_completed
+                                job.save(update_fields=['total_nodes', 'completed_nodes'])
                         except Exception as e:
                             print(f"[Market Analysis] ✗ Failed to create child nodes: {e}")
                             # Don't fail the node, it's already completed
@@ -549,18 +558,78 @@ You are given a JSON input describing the current node and constraints:
                 if open_brackets != close_brackets or open_braces != close_braces:
                     print(f"[Parser] Bracket imbalance: [ {open_brackets}/{close_brackets}, {{ {open_braces}/{close_braces}")
                     
-                    # Fix 2a: Simple array bracket fix (only for primitive arrays)
-                    # Pattern: [primitive_values} where primitive means no nested brackets
+                    # Fix 2a: Context-aware bracket fix for arrays
+                    # Track opening brackets and fix mismatched closers based on context
                     import re
-                    test_text = re.sub(r'\[([^\[\]{}]*?)\}', r'[\1]', text)
+                    
+                    def fix_array_brackets(json_str):
+                        """Fix mismatched array brackets by tracking context"""
+                        result = []
+                        stack = []  # Track what we've opened: 'array' or 'object'
+                        in_string = False
+                        escape_next = False
+                        
+                        for i, char in enumerate(json_str):
+                            # Handle string state
+                            if escape_next:
+                                result.append(char)
+                                escape_next = False
+                                continue
+                            
+                            if char == '\\' and in_string:
+                                result.append(char)
+                                escape_next = True
+                                continue
+                            
+                            if char == '"':
+                                in_string = not in_string
+                                result.append(char)
+                                continue
+                            
+                            # Only process structural characters outside strings
+                            if not in_string:
+                                if char == '[':
+                                    stack.append('array')
+                                    result.append(char)
+                                elif char == '{':
+                                    stack.append('object')
+                                    result.append(char)
+                                elif char == ']':
+                                    if stack and stack[-1] == 'array':
+                                        stack.pop()
+                                        result.append(char)
+                                    elif stack and stack[-1] == 'object':
+                                        # Wrong closer - should be } but got ]
+                                        stack.pop()
+                                        result.append('}')
+                                    else:
+                                        result.append(char)
+                                elif char == '}':
+                                    if stack and stack[-1] == 'object':
+                                        stack.pop()
+                                        result.append(char)
+                                    elif stack and stack[-1] == 'array':
+                                        # Wrong closer - should be ] but got }
+                                        stack.pop()
+                                        result.append(']')
+                                    else:
+                                        result.append(char)
+                                else:
+                                    result.append(char)
+                            else:
+                                result.append(char)
+                        
+                        return ''.join(result)
+                    
+                    test_text = fix_array_brackets(text)
                     
                     # Test if this fix helps
                     try:
                         json.loads(test_text)
                         text = test_text
-                        fixes_applied.append("fixed simple array brackets")
+                        fixes_applied.append("fixed array/object bracket mismatches")
                     except json.JSONDecodeError:
-                        # Fix didn't help, try more aggressive approach
+                        # Fix didn't help, try fallback approach
                         if open_brackets > close_brackets and open_braces > close_braces:
                             # Both brackets and braces are unclosed - likely truncated JSON
                             print(f"[Parser] JSON appears truncated, cannot safely fix")
